@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <GVL Name="GVL" Id="{2b3c4d5e-6f78-9012-3456-789012345678}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    //=============================================================================
+    // Global Variable List for Serial Interpreter Project
+    // Purpose: System-wide constants and configuration parameters
+    // Target: Beckhoff CX7080 Controller with DUET3D 6HC communication
+    //=============================================================================
+    
+    //-----------------------------------------------------------------------------
+    // Serial Communication Configuration
+    //-----------------------------------------------------------------------------
+    SERIAL_BAUD_RATE        : DWORD := 115200;     // Baud rate for DUET communication
+    SERIAL_PORT             : STRING := 'COM1';    // Serial port designation
+    SERIAL_TIMEOUT_MS       : UINT := 1000;        // Timeout for serial operations
+    
+    // Command protocol constants
+    CMD_TERMINATOR          : STRING := '$0D$0A';  // CRLF line termination
+    CMD_SEPARATOR           : STRING := ':';        // Command field separator
+    
+    // DUET3D command prefixes (for reference)
+    DUET_SEND_PREFIX        : STRING := 'M118';     // DUET command for sending messages
+    DUET_RECEIVE_PREFIX     : STRING := 'M575';     // DUET command for serial config
+    
+    //-----------------------------------------------------------------------------
+    // Command Types
+    //-----------------------------------------------------------------------------
+    CMD_DIGITAL_OUTPUT      : STRING := 'DO';      // Digital output control
+    CMD_ANALOG_OUTPUT       : STRING := 'AO';      // Analog output control
+    CMD_DIGITAL_INPUT       : STRING := 'DI';      // Digital input status request
+    CMD_SYSTEM_STATUS       : STRING := 'SYS';     // System status request
+    
+    //-----------------------------------------------------------------------------
+    // EtherCAT I/O Module Configuration
+    //-----------------------------------------------------------------------------
+    
+    // EPP2008-0002 Digital Output Module
+    EPP2008_ADDRESS         : UINT := 1001;        // Module base address
+    EPP2008_CHANNELS        : UINT := 8;           // Number of output channels
+    EPP2008_MAX_CURRENT     : REAL := 0.5;         // Max current per channel (A)
+    EPP2008_TOTAL_CURRENT   : REAL := 3.0;         // Max total current (A)
+    
+    // EPP4174-0002 Analog Output Module  
+    EPP4174_ADDRESS         : UINT := 1002;        // Module base address
+    EPP4174_CHANNELS        : UINT := 4;           // Number of output channels
+    EPP4174_RESOLUTION      : UINT := 16;          // Bit resolution
+    EPP4174_VOLTAGE_RANGE   : REAL := 20.0;        // ±10V range
+    EPP4174_CURRENT_RANGE   : REAL := 20.0;        // 0-20mA range
+    
+    //-----------------------------------------------------------------------------
+    // System Information
+    //-----------------------------------------------------------------------------
+    SYSTEM_VERSION          : STRING := '1.0.0';   // Software version
+    CONTROLLER_TYPE         : STRING := 'CX7080';  // Hardware platform
+    PROJECT_NAME            : STRING := 'SerialInterpreter'; // Project identifier
+    
+    //-----------------------------------------------------------------------------
+    // Error Codes
+    //-----------------------------------------------------------------------------
+    ERR_NO_ERROR            : UINT := 0;           // No error condition
+    ERR_INVALID_COMMAND     : UINT := 1;           // Unknown or malformed command
+    ERR_IO_MODULE_ERROR     : UINT := 2;           // EtherCAT module communication failure
+    ERR_SERIAL_ERROR        : UINT := 3;           // Serial communication problem
+    ERR_CHECKSUM_ERROR      : UINT := 4;           // Command checksum validation failed
+    ERR_INVALID_CHANNEL     : UINT := 5;           // Channel number out of range
+    ERR_INVALID_VALUE       : UINT := 6;           // Parameter value out of bounds
+    ERR_TIMEOUT_ERROR       : UINT := 7;           // Operation timeout
+    ERR_INITIALIZATION      : UINT := 8;           // System initialization failure
+    ERR_MODULE_OFFLINE      : UINT := 9;           // EtherCAT module not responding
+    
+    //-----------------------------------------------------------------------------
+    // Response Messages
+    //-----------------------------------------------------------------------------
+    RESPONSE_OK             : STRING := 'OK';      // Success response prefix
+    RESPONSE_ERROR          : STRING := 'ERR';     // Error response prefix
+    
+    //-----------------------------------------------------------------------------
+    // Command Parameter Limits
+    //-----------------------------------------------------------------------------
+    MAX_COMMAND_LENGTH      : UINT := 255;         // Maximum command string length
+    MAX_RESPONSE_LENGTH     : UINT := 255;         // Maximum response string length
+    MAX_PARAMETERS          : UINT := 10;          // Maximum parameters per command
+    
+    // Digital output limits
+    DO_MIN_CHANNEL          : UINT := 0;           // Minimum digital output channel
+    DO_MAX_CHANNEL          : UINT := 7;           // Maximum digital output channel
+    DO_MIN_VALUE            : UINT := 0;           // Digital output OFF
+    DO_MAX_VALUE            : UINT := 1;           // Digital output ON
+    
+    // Analog output limits
+    AO_MIN_CHANNEL          : UINT := 0;           // Minimum analog output channel
+    AO_MAX_CHANNEL          : UINT := 3;           // Maximum analog output channel
+    AO_MIN_VALUE            : UINT := 0;           // Minimum analog output value
+    AO_MAX_VALUE            : UINT := 65535;       // Maximum analog output value (16-bit)
+    
+    //-----------------------------------------------------------------------------
+    // Timing Configuration
+    //-----------------------------------------------------------------------------
+    MAIN_CYCLE_TIME_MS      : UINT := 10;          // Main task cycle time
+    SERIAL_POLL_TIME_MS     : UINT := 5;           // Serial polling interval
+    HEARTBEAT_TIME_MS       : UINT := 1000;        // System heartbeat interval
+    COMMAND_TIMEOUT_MS      : UINT := 5000;        // Command processing timeout
+    
+    //-----------------------------------------------------------------------------
+    // Buffer Sizes
+    //-----------------------------------------------------------------------------
+    SERIAL_RX_BUFFER_SIZE   : UINT := 1024;        // Serial receive buffer size
+    SERIAL_TX_BUFFER_SIZE   : UINT := 1024;        // Serial transmit buffer size
+    COMMAND_QUEUE_SIZE      : UINT := 16;          // Command queue depth
+    
+    //-----------------------------------------------------------------------------
+    // Diagnostic Constants
+    //-----------------------------------------------------------------------------
+    MAX_ERROR_COUNT         : UINT := 1000;        // Maximum error counter value
+    ERROR_LOG_SIZE          : UINT := 50;          // Error log entries
+    
+END_VAR
+
+//=============================================================================
+// Type Definitions
+//=============================================================================
+
+TYPE E_InitState :
+(
+    INIT_START      := 0,   // Start initialization sequence
+    INIT_SERIAL     := 1,   // Initialize serial communication
+    INIT_PARSER     := 2,   // Initialize command parser
+    INIT_IO         := 3,   // Initialize I/O modules
+    INIT_COMPLETE   := 4,   // Initialization completed successfully
+    INIT_ERROR      := 5,   // Initialization error occurred
+    RUNNING         := 10   // Normal operation mode
+);
+END_TYPE
+
+TYPE E_CommandType :
+(
+    CMD_UNKNOWN         := 0,   // Unknown command type
+    CMD_DO              := 1,   // Digital output command
+    CMD_AO              := 2,   // Analog output command
+    CMD_DI              := 3,   // Digital input request
+    CMD_SYS             := 4    // System status request
+);
+END_TYPE
+
+TYPE E_SerialState :
+(
+    SERIAL_DISCONNECTED := 0,   // Serial port not connected
+    SERIAL_CONNECTING   := 1,   // Attempting connection
+    SERIAL_CONNECTED    := 2,   // Successfully connected
+    SERIAL_ERROR        := 3,   // Communication error
+    SERIAL_TIMEOUT      := 4    // Communication timeout
+);
+END_TYPE
+
+TYPE ST_ParsedCommand :
+STRUCT
+    eCommandType    : E_CommandType;    // Parsed command type
+    sCommandType    : STRING(10);       // Command type string
+    nParameter1     : UINT;             // First parameter value
+    nParameter2     : UINT;             // Second parameter value
+    nParameter3     : UINT;             // Third parameter value
+    sChecksum       : STRING(2);        // Received checksum
+    bChecksumValid  : BOOL;             // Checksum validation result
+    nErrorCode      : UINT;             // Parsing error code
+END_STRUCT
+END_TYPE
+
+TYPE ST_SystemStatus :
+STRUCT
+    bInitialized        : BOOL;         // System initialization complete
+    bSerialConnected    : BOOL;         // Serial communication status
+    bIOModulesOnline    : BOOL;         // EtherCAT modules status
+    nErrorCount         : UINT;         // Total error counter
+    sLastError          : STRING(100);  // Last error message
+    nUptime             : UDINT;        // System uptime in seconds
+    nCommandsProcessed  : UDINT;        // Total commands processed
+END_STRUCT
+END_TYPE
+
+TYPE ST_IOModuleStatus :
+STRUCT
+    bEPP2008Online      : BOOL;         // Digital output module status
+    bEPP4174Online      : BOOL;         // Analog output module status
+    arrDigitalOutputs   : ARRAY[0..7] OF BOOL;     // Digital output states
+    arrAnalogOutputs    : ARRAY[0..3] OF INT;      // Analog output values
+    arrDigitalInputs    : ARRAY[0..15] OF BOOL;    // Digital input states
+END_STRUCT
+END_TYPE]]></Declaration>
+  </GVL>
+</TcPlcObject>

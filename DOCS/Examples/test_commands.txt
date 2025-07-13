@@ -1,0 +1,321 @@
+# TUBS_IO Test Commands and Examples
+# Purpose: Command examples for testing and validation
+# Usage: Copy commands to DUET console or use in test scripts
+
+# ============================================================================
+# BASIC CONNECTIVITY TESTS
+# ============================================================================
+
+# Test 1: System Status Request
+# Purpose: Verify basic communication with CX7080
+# Command: SYS:STATUS:0:XX (replace XX with actual checksum)
+# Expected Response: OK:CX7080:1.0.0:XX
+
+SYS:STATUS:0:E4
+
+# Test 2: Simple Digital Output Test
+# Purpose: Test basic digital output control
+# Command: DO:CH:VAL:XX
+# Expected Response: OK:DO:CH:XX
+
+DO:0:1:A3    # Turn on digital output channel 0
+DO:0:0:B2    # Turn off digital output channel 0
+
+# Test 3: Digital Input Status Request
+# Purpose: Test input status reading capability
+# Command: DI:ALL:0:XX
+# Expected Response: DI:HEXDATA:XX (e.g., DI:F0A5:B3)
+
+DI:ALL:0:A7
+
+# ============================================================================
+# DIGITAL OUTPUT COMMAND TESTS
+# ============================================================================
+
+# Valid Digital Output Commands
+# Format: DO:CH:VAL:XX where CH=0-7, VAL=0-1
+
+DO:0:1:A3    # Channel 0 ON
+DO:0:0:B2    # Channel 0 OFF
+DO:1:1:A0    # Channel 1 ON
+DO:1:0:B1    # Channel 1 OFF
+DO:2:1:A1    # Channel 2 ON
+DO:2:0:B0    # Channel 2 OFF
+DO:3:1:A2    # Channel 3 ON
+DO:3:0:B3    # Channel 3 OFF
+DO:4:1:A7    # Channel 4 ON
+DO:4:0:B6    # Channel 4 OFF
+DO:5:1:A4    # Channel 5 ON
+DO:5:0:B5    # Channel 5 OFF
+DO:6:1:A5    # Channel 6 ON
+DO:6:0:B4    # Channel 6 OFF
+DO:7:1:A6    # Channel 7 ON
+DO:7:0:B7    # Channel 7 OFF
+
+# Invalid Digital Output Commands (for error testing)
+DO:8:1:XX    # Invalid channel (>7) - Should return ERR:INVALID_CHANNEL:XX
+DO:0:2:XX    # Invalid value (>1) - Should return ERR:INVALID_VALUE:XX
+DO:-1:1:XX   # Invalid channel (<0) - Should return ERR:INVALID_CHANNEL:XX
+
+# ============================================================================
+# ANALOG OUTPUT COMMAND TESTS
+# ============================================================================
+
+# Valid Analog Output Commands
+# Format: AO:CH:VAL:XX where CH=0-3, VAL=0-65535
+
+AO:0:0:C9        # Channel 0 minimum (0V or 0mA)
+AO:0:16384:D5    # Channel 0 quarter scale
+AO:0:32768:B4    # Channel 0 mid-scale (0V in ±10V mode)
+AO:0:49152:E7    # Channel 0 three-quarter scale
+AO:0:65535:C8    # Channel 0 maximum (+10V or 20mA)
+
+AO:1:0:CA        # Channel 1 minimum
+AO:1:32768:B7    # Channel 1 mid-scale
+AO:1:65535:CB    # Channel 1 maximum
+
+AO:2:0:CB        # Channel 2 minimum
+AO:2:32768:B6    # Channel 2 mid-scale
+AO:2:65535:CA    # Channel 2 maximum
+
+AO:3:0:C8        # Channel 3 minimum
+AO:3:32768:B5    # Channel 3 mid-scale
+AO:3:65535:C9    # Channel 3 maximum
+
+# Common analog values for testing
+AO:0:6553:XX     # ~10% of full scale
+AO:0:13107:XX    # ~20% of full scale
+AO:0:19660:XX    # ~30% of full scale
+AO:0:26214:XX    # ~40% of full scale
+AO:0:32768:B4    # 50% of full scale (mid-point)
+AO:0:39321:XX    # ~60% of full scale
+AO:0:45875:XX    # ~70% of full scale
+AO:0:52428:XX    # ~80% of full scale
+AO:0:58982:XX    # ~90% of full scale
+
+# Invalid Analog Output Commands (for error testing)
+AO:4:1000:XX     # Invalid channel (>3) - Should return ERR:INVALID_CHANNEL:XX
+AO:0:65536:XX    # Invalid value (>65535) - Should return ERR:INVALID_VALUE:XX
+AO:-1:1000:XX    # Invalid channel (<0) - Should return ERR:INVALID_CHANNEL:XX
+
+# ============================================================================
+# COMMAND SEQUENCE TESTS
+# ============================================================================
+
+# Test Sequence 1: All Digital Outputs ON
+DO:0:1:A3
+DO:1:1:A0
+DO:2:1:A1
+DO:3:1:A2
+DO:4:1:A7
+DO:5:1:A4
+DO:6:1:A5
+DO:7:1:A6
+
+# Test Sequence 2: All Digital Outputs OFF
+DO:0:0:B2
+DO:1:0:B1
+DO:2:0:B0
+DO:3:0:B3
+DO:4:0:B6
+DO:5:0:B5
+DO:6:0:B4
+DO:7:0:B7
+
+# Test Sequence 3: Analog Output Ramp Up (Channel 0)
+AO:0:0:C9        # Start at 0
+AO:0:13107:XX    # 20%
+AO:0:26214:XX    # 40%
+AO:0:39321:XX    # 60%
+AO:0:52428:XX    # 80%
+AO:0:65535:C8    # 100%
+
+# Test Sequence 4: Analog Output Ramp Down (Channel 0)
+AO:0:65535:C8    # Start at 100%
+AO:0:52428:XX    # 80%
+AO:0:39321:XX    # 60%
+AO:0:26214:XX    # 40%
+AO:0:13107:XX    # 20%
+AO:0:0:C9        # 0%
+
+# ============================================================================
+# ERROR CONDITION TESTS
+# ============================================================================
+
+# Malformed Commands (should return ERR:INVALID_COMMAND:XX)
+INVALID:COMMAND:XX     # Unknown command type
+DO:CHANNEL:VALUE:XX    # Non-numeric parameters
+INCOMPLETE:XX          # Incomplete command
+:MISSING:COMMAND:XX    # Missing command field
+
+# Checksum Error Tests (should return ERR:CHECKSUM_ERROR:XX)
+DO:0:1:00             # Incorrect checksum (should be A3)
+AO:0:1000:FF          # Incorrect checksum
+SYS:STATUS:0:00       # Incorrect checksum (should be E4)
+
+# Parameter Boundary Tests
+DO:7:1:A6             # Maximum valid digital channel
+DO:8:1:XX             # Minimum invalid digital channel
+AO:3:65535:C9         # Maximum valid analog channel and value
+AO:4:0:XX             # Minimum invalid analog channel
+
+# ============================================================================
+# STRESS TESTS
+# ============================================================================
+
+# Rapid Command Sequence (test system responsiveness)
+# Send these commands with minimal delay between them
+DO:0:1:A3
+DO:0:0:B2
+DO:1:1:A0
+DO:1:0:B1
+DO:2:1:A1
+DO:2:0:B0
+
+# High-Frequency Toggling (Channel 0)
+DO:0:1:A3
+DO:0:0:B2
+DO:0:1:A3
+DO:0:0:B2
+DO:0:1:A3
+DO:0:0:B2
+
+# All Channels Simultaneous Test
+DO:0:1:A3
+DO:1:1:A0
+DO:2:1:A1
+DO:3:1:A2
+AO:0:32768:B4
+AO:1:32768:B7
+AO:2:32768:B6
+AO:3:32768:B5
+
+# ============================================================================
+# APPLICATION SCENARIO TESTS
+# ============================================================================
+
+# Scenario 1: Print Start Sequence
+SYS:STATUS:0:E4      # Check system status
+DO:0:1:A3            # Turn on chamber lighting
+DO:1:1:A0            # Turn on exhaust fan
+AO:0:16384:D5        # Set chamber heater to 25%
+DI:ALL:0:A7          # Check input status
+
+# Scenario 2: Print End Sequence
+AO:0:0:C9            # Turn off chamber heater
+DO:1:0:B1            # Turn off exhaust fan (after delay)
+DO:0:0:B2            # Turn off chamber lighting
+
+# Scenario 3: Emergency Shutdown
+DO:0:0:B2            # All digital outputs OFF
+DO:1:0:B1
+DO:2:0:B0
+DO:3:0:B3
+DO:4:0:B6
+DO:5:0:B5
+DO:6:0:B4
+DO:7:0:B7
+AO:0:0:C9            # All analog outputs to 0
+AO:1:0:CA
+AO:2:0:CB
+AO:3:0:C8
+
+# ============================================================================
+# DUET3D MACRO TEST COMMANDS
+# ============================================================================
+
+# These commands should be sent via DUET console using M118 P2 S"command"
+
+# Basic system test from DUET
+M118 P2 S"SYS:STATUS:0:E4"
+
+# Digital output control from DUET
+M118 P2 S"DO:0:1:A3"     # Turn on channel 0
+M118 P2 S"DO:0:0:B2"     # Turn off channel 0
+
+# Analog output control from DUET
+M118 P2 S"AO:0:32768:B4" # Set channel 0 to mid-scale
+
+# Input status request from DUET
+M118 P2 S"DI:ALL:0:A7"   # Request input status
+
+# ============================================================================
+# VALIDATION CHECKLIST
+# ============================================================================
+
+# When testing, verify the following responses:
+
+# 1. System Status Test:
+#    Command: SYS:STATUS:0:E4
+#    Expected: OK:CX7080:1.0.0:XX (where XX is valid checksum)
+
+# 2. Digital Output Test:
+#    Command: DO:0:1:A3
+#    Expected: OK:DO:0:XX (where XX is valid checksum)
+
+# 3. Analog Output Test:
+#    Command: AO:0:32768:B4
+#    Expected: OK:AO:0:XX (where XX is valid checksum)
+
+# 4. Digital Input Test:
+#    Command: DI:ALL:0:A7
+#    Expected: DI:XXXX:YY (where XXXX is 4-digit hex, YY is checksum)
+
+# 5. Error Response Test:
+#    Command: DO:8:1:XX (invalid channel)
+#    Expected: ERR:INVALID_CHANNEL:XX
+
+# 6. Checksum Error Test:
+#    Command: DO:0:1:00 (wrong checksum)
+#    Expected: ERR:CHECKSUM_ERROR:XX
+
+# ============================================================================
+# TROUBLESHOOTING COMMANDS
+# ============================================================================
+
+# If experiencing communication issues, try these diagnostic commands:
+
+# 1. Verify DUET serial configuration
+M575 P2                  # Check current serial port settings
+
+# 2. Test basic serial transmission
+M118 P2 S"TEST"         # Send simple test message
+
+# 3. Check for TUBS_IO response with system status
+M118 P2 S"SYS:STATUS:0:E4"
+
+# 4. Test with minimal command
+M118 P2 S"DO:0:1:A3"
+
+# If no responses are received:
+# - Check serial wiring (TX/RX, GND connections)
+# - Verify CX7080 power and status
+# - Confirm baud rate settings (115200 on both sides)
+# - Check level shifter operation (3.3V TTL to RS232)
+
+# ============================================================================
+# PERFORMANCE BENCHMARKS
+# ============================================================================
+
+# Expected response times:
+# - System status request: < 25ms
+# - Digital output command: < 50ms
+# - Analog output command: < 50ms
+# - Digital input request: < 25ms
+# - Error responses: < 25ms
+
+# Test these timing expectations during validation
+
+# ============================================================================
+# NOTES FOR TESTING
+# ============================================================================
+
+# 1. Always wait at least 10ms between commands to allow processing
+# 2. Monitor DUET console for responses after each command
+# 3. Replace XX placeholders with actual checksums for production use
+# 4. Test error conditions to verify proper error handling
+# 5. Document actual response times for your specific setup
+# 6. Verify all I/O channels work as expected with connected hardware
+# 7. Test under various load conditions (printing, idle, etc.)
+
+# End of test commands

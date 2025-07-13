@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <POU Name="FB_SerialHandler" Id="{3c4d5e6f-7890-1234-5678-90123456789a}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SerialHandler
+//=============================================================================
+// Function Block: FB_SerialHandler
+// Purpose: Manages serial communication with DUET3D 6HC controller
+// Features: Connection management, command reception, response transmission
+//=============================================================================
+
+VAR_INPUT
+END_VAR
+
+VAR_OUTPUT
+    bConnected              : BOOL;                 // Serial connection status
+    bNewCommandReceived     : BOOL;                 // New command available flag
+    sReceivedCommand        : STRING(255);          // Last received command
+    nLastError              : UINT;                 // Last error code
+    eConnectionState        : E_SerialState;        // Current connection state
+END_VAR
+
+VAR
+    // Serial communication function blocks (TwinCAT library)
+    fbSerialLineControl     : SerialLineControl;    // Serial communication control
+    fbComOpen              : ComOpen;               // Serial port opening
+    fbComClose             : ComClose;              // Serial port closing
+    
+    // Internal state management
+    bInitialized           : BOOL := FALSE;         // Initialization complete flag
+    eState                 : E_SerialState := E_SerialState.SERIAL_DISCONNECTED;
+    
+    // Communication buffers
+    sReceiveBuffer         : STRING(1024);          // Receive data buffer
+    sSendBuffer            : STRING(1024);          // Send data buffer
+    nBytesReceived         : UDINT;                 // Bytes received counter
+    nBytesSent             : UDINT;                 // Bytes sent counter
+    
+    // Command processing
+    sWorkingBuffer         : STRING(1024);          // Working buffer for processing
+    nCommandStartPos       : INT;                   // Command start position
+    nCommandEndPos         : INT;                   // Command end position
+    
+    // Timers and timeouts
+    tonConnectionTimeout   : TON;                   // Connection timeout timer
+    tonReceiveTimeout      : TON;                   // Receive timeout timer
+    tonReconnectDelay      : TON;                   // Reconnection delay timer
+    
+    // Connection parameters
+    stComSettings          : ST_ComSettings;        // Serial port configuration
+    
+    // Statistics and diagnostics
+    nConnectionAttempts    : UINT;                  // Connection attempt counter
+    nCommandsReceived      : UDINT;                 // Total commands received
+    nResponsesSent         : UDINT;                 // Total responses sent
+    nErrorCount            : UINT;                  // Error counter
+    
+    // Internal flags
+    bSendInProgress        : BOOL;                  // Send operation in progress
+    bReceiveInProgress     : BOOL;                  // Receive operation in progress
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//=============================================================================
+// Main execution of Serial Handler
+//=============================================================================
+
+// State machine for serial communication management
+CASE eState OF
+    
+    E_SerialState.SERIAL_DISCONNECTED:
+        // Initialize connection if needed
+        IF bInitialized THEN
+            eState := E_SerialState.SERIAL_CONNECTING;
+            tonConnectionTimeout(IN := TRUE, PT := T#10S);
+            nConnectionAttempts := nConnectionAttempts + 1;
+        END_IF
+        bConnected := FALSE;
+        eConnectionState := eState;
+        
+    E_SerialState.SERIAL_CONNECTING:
+        // Attempt to open serial connection
+        fbComOpen(
+            sComPort := GVL.SERIAL_PORT,
+            dwBaudRate := GVL.SERIAL_BAUD_RATE,
+            nDataBits := 8,
+            nStopBits := 1,
+            nParity := 0,           // No parity
+            nHandshake := 0         // No handshake
+        );
+        
+        IF fbComOpen.bOpen THEN
+            // Connection successful
+            eState := E_SerialState.SERIAL_CONNECTED;
+            bConnected := TRUE;
+            tonConnectionTimeout(IN := FALSE);
+            nLastError := GVL.ERR_NO_ERROR;
+            
+        ELSIF tonConnectionTimeout.Q THEN
+            // Connection timeout
+            eState := E_SerialState.SERIAL_ERROR;
+            nLastError := GVL.ERR_SERIAL_ERROR;
+            tonConnectionTimeout(IN := FALSE);
+        END_IF
+        eConnectionState := eState;
+        
+    E_SerialState.SERIAL_CONNECTED:
+        // Normal operation - handle communication
+        bConnected := TRUE;
+        
+        // Handle incoming data
+        HandleIncomingData();
+        
+        // Check for connection errors
+        IF NOT fbComOpen.bOpen THEN
+            eState := E_SerialState.SERIAL_ERROR;
+            bConnected := FALSE;
+            nLastError := GVL.ERR_SERIAL_ERROR;
+            nErrorCount := nErrorCount + 1;
+        END_IF
+        eConnectionState := eState;
+        
+    E_SerialState.SERIAL_ERROR:
+        // Handle communication errors
+        bConnected := FALSE;
+        
+        // Close connection if open
+        IF fbComOpen.bOpen THEN
+            fbComClose();
+        END_IF
+        
+        // Wait before attempting reconnection
+        tonReconnectDelay(IN := TRUE, PT := T#5S);
+        IF tonReconnectDelay.Q THEN
+            tonReconnectDelay(IN := FALSE);
+            eState := E_SerialState.SERIAL_DISCONNECTED;
+        END_IF
+        eConnectionState := eState;
+        
+    E_SerialState.SERIAL_TIMEOUT:
+        // Handle timeout conditions
+        bConnected := FALSE;
+        nLastError := GVL.ERR_TIMEOUT_ERROR;
+        eState := E_SerialState.SERIAL_ERROR;
+        eConnectionState := eState;
+        
+END_CASE
+
+// Update timers
+tonConnectionTimeout();
+tonReceiveTimeout();
+tonReconnectDelay();]]></ST>
+    </Implementation>
+    
+    <Method Name="Init" Id="{4d5e6f78-9012-3456-7890-123456789abc}">
+      <Declaration><![CDATA[METHOD Init : BOOL
+//=============================================================================
+// Initialize Serial Handler
+// Returns: TRUE if initialization successful
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Configure serial communication settings
+stComSettings.dwBaudRate := GVL.SERIAL_BAUD_RATE;
+stComSettings.nDataBits := 8;
+stComSettings.nStopBits := 1;
+stComSettings.nParity := 0;
+stComSettings.nHandshake := 0;
+
+// Initialize buffers
+sReceiveBuffer := '';
+sSendBuffer := '';
+sWorkingBuffer := '';
+sReceivedCommand := '';
+
+// Reset counters and flags
+nBytesReceived := 0;
+nBytesSent := 0;
+nCommandsReceived := 0;
+nResponsesSent := 0;
+nErrorCount := 0;
+nConnectionAttempts := 0;
+
+bNewCommandReceived := FALSE;
+bSendInProgress := FALSE;
+bReceiveInProgress := FALSE;
+
+// Set state and error code
+eState := E_SerialState.SERIAL_DISCONNECTED;
+nLastError := GVL.ERR_NO_ERROR;
+
+// Mark as initialized
+bInitialized := TRUE;
+
+Init := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="HandleIncomingData" Id="{5e6f7890-1234-5678-9012-3456789abcde}">
+      <Declaration><![CDATA[METHOD HandleIncomingData : BOOL
+//=============================================================================
+// Handle incoming serial data and extract complete commands
+// Returns: TRUE if data was processed
+//=============================================================================
+VAR_INPUT
+END_VAR
+VAR
+    nTerminatorPos : INT;
+    sCompleteCommand : STRING(255);
+    nCommandLength : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Use SerialLineControl to receive data
+fbSerialLineControl(
+    Mode := SERIALLINEMODE_EX_RECEIVE,
+    pBuffer := ADR(sReceiveBuffer),
+    cbBuffer := SIZEOF(sReceiveBuffer),
+    Timeout := T#100MS
+);
+
+// Check if new data was received
+IF fbSerialLineControl.TxSize > 0 THEN
+    nBytesReceived := nBytesReceived + fbSerialLineControl.TxSize;
+    
+    // Add received data to working buffer
+    sWorkingBuffer := sWorkingBuffer + sReceiveBuffer;
+    
+    // Look for complete commands (terminated by CRLF)
+    nTerminatorPos := FIND(sWorkingBuffer, GVL.CMD_TERMINATOR);
+    
+    WHILE nTerminatorPos > 0 DO
+        // Extract complete command
+        sCompleteCommand := LEFT(sWorkingBuffer, nTerminatorPos - 1);
+        nCommandLength := LEN(sCompleteCommand);
+        
+        // Remove processed command from buffer
+        sWorkingBuffer := RIGHT(sWorkingBuffer, 
+                               LEN(sWorkingBuffer) - nTerminatorPos - LEN(GVL.CMD_TERMINATOR) + 1);
+        
+        // Process the complete command
+        IF nCommandLength > 0 THEN
+            ProcessCompleteCommand(sCompleteCommand);
+        END_IF
+        
+        // Look for next command
+        nTerminatorPos := FIND(sWorkingBuffer, GVL.CMD_TERMINATOR);
+    END_WHILE
+    
+    // Clear receive buffer for next operation
+    sReceiveBuffer := '';
+END_IF
+
+HandleIncomingData := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ProcessCompleteCommand" Id="{6f789012-3456-7890-1234-56789abcdef0}">
+      <Declaration><![CDATA[METHOD ProcessCompleteCommand : BOOL
+//=============================================================================
+// Process a complete command string
+// Input: Complete command string without terminators
+// Returns: TRUE if command was processed
+//=============================================================================
+VAR_INPUT
+    sCommand : STRING(255);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Store the received command
+sReceivedCommand := sCommand;
+
+// Set flag for main program
+bNewCommandReceived := TRUE;
+
+// Update statistics
+nCommandsReceived := nCommandsReceived + 1;
+
+ProcessCompleteCommand := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="SendResponse" Id="{789012345-6789-0123-4567-890123456789}">
+      <Declaration><![CDATA[METHOD SendResponse : BOOL
+//=============================================================================
+// Send response message to DUET3D controller
+// Input: Response string to send
+// Returns: TRUE if send was successful or initiated
+//=============================================================================
+VAR_INPUT
+    sResponse : STRING(255);
+END_VAR
+VAR
+    sFormattedResponse : STRING(300);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Check if we're connected and not already sending
+IF bConnected AND NOT bSendInProgress THEN
+    
+    // Format response with proper termination
+    sFormattedResponse := sResponse + GVL.CMD_TERMINATOR;
+    
+    // Copy to send buffer
+    sSendBuffer := sFormattedResponse;
+    
+    // Use SerialLineControl to send data
+    fbSerialLineControl(
+        Mode := SERIALLINEMODE_EX_SEND,
+        pBuffer := ADR(sSendBuffer),
+        cbBuffer := LEN(sSendBuffer),
+        Timeout := T#1S
+    );
+    
+    // Check if send was initiated successfully
+    IF fbSerialLineControl.TxSize > 0 THEN
+        bSendInProgress := TRUE;
+        nBytesSent := nBytesSent + fbSerialLineControl.TxSize;
+        nResponsesSent := nResponsesSent + 1;
+        SendResponse := TRUE;
+    ELSE
+        SendResponse := FALSE;
+        nLastError := GVL.ERR_SERIAL_ERROR;
+    END_IF
+    
+    // Reset send flag after operation
+    bSendInProgress := FALSE;
+    
+ELSE
+    SendResponse := FALSE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="GetStatistics" Id="{890123456-7890-1234-5678-901234567890}">
+      <Declaration><![CDATA[METHOD GetStatistics : ST_SerialStatistics
+//=============================================================================
+// Get communication statistics
+// Returns: Structure with communication statistics
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[GetStatistics.nConnectionAttempts := nConnectionAttempts;
+GetStatistics.nCommandsReceived := nCommandsReceived;
+GetStatistics.nResponsesSent := nResponsesSent;
+GetStatistics.nBytesReceived := nBytesReceived;
+GetStatistics.nBytesSent := nBytesSent;
+GetStatistics.nErrorCount := nErrorCount;
+GetStatistics.eCurrentState := eState;
+GetStatistics.bConnected := bConnected;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ResetConnection" Id="{901234567-8901-2345-6789-012345678901}">
+      <Declaration><![CDATA[METHOD ResetConnection : BOOL
+//=============================================================================
+// Force connection reset (for troubleshooting)
+// Returns: TRUE if reset was initiated
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Close current connection if open
+IF fbComOpen.bOpen THEN
+    fbComClose();
+END_IF
+
+// Reset state to disconnected
+eState := E_SerialState.SERIAL_DISCONNECTED;
+bConnected := FALSE;
+
+// Clear buffers
+sReceiveBuffer := '';
+sSendBuffer := '';
+sWorkingBuffer := '';
+
+// Reset flags
+bSendInProgress := FALSE;
+bReceiveInProgress := FALSE;
+bNewCommandReceived := FALSE;
+
+ResetConnection := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>
+
+//=============================================================================
+// Additional Type Definitions for Serial Handler
+//=============================================================================
+
+TYPE ST_ComSettings :
+STRUCT
+    dwBaudRate      : DWORD;        // Baud rate setting
+    nDataBits       : UINT;         // Data bits (7, 8)
+    nStopBits       : UINT;         // Stop bits (1, 2)
+    nParity         : UINT;         // Parity (0=none, 1=odd, 2=even)
+    nHandshake      : UINT;         // Handshake (0=none, 1=XON/XOFF, 2=RTS/CTS)
+END_STRUCT
+END_TYPE
+
+TYPE ST_SerialStatistics :
+STRUCT
+    nConnectionAttempts : UINT;     // Total connection attempts
+    nCommandsReceived   : UDINT;    // Total commands received
+    nResponsesSent      : UDINT;    // Total responses sent
+    nBytesReceived      : UDINT;    // Total bytes received
+    nBytesSent          : UDINT;    // Total bytes sent
+    nErrorCount         : UINT;     // Total error count
+    eCurrentState       : E_SerialState; // Current connection state
+    bConnected          : BOOL;     // Connection status
+END_STRUCT
+END_TYPE

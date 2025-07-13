@@ -1,0 +1,531 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <POU Name="FB_CommandParser" Id="{4d5e6f78-9012-3456-7890-123456789abc}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_CommandParser
+//=============================================================================
+// Function Block: FB_CommandParser
+// Purpose: Parse and validate commands from DUET3D controller
+// Format: CMD:PARAM1:PARAM2:CHECKSUM
+// Example: DO:0:1:A3 (Digital Output, Channel 0, Value 1, Checksum A3)
+//=============================================================================
+
+VAR_INPUT
+END_VAR
+
+VAR_OUTPUT
+    nLastError          : UINT;                 // Last parsing error code
+    bInitialized        : BOOL;                 // Parser initialization status
+END_VAR
+
+VAR
+    // Parsing working variables
+    arrParts            : ARRAY[0..9] OF STRING(50);   // Command parts array
+    nPartCount          : INT;                          // Number of parsed parts
+    sWorkingString      : STRING(255);                  // Working string for parsing
+    
+    // Validation variables
+    sCalculatedChecksum : STRING(2);                    // Calculated checksum
+    sReceivedChecksum   : STRING(2);                    // Received checksum
+    bChecksumValid      : BOOL;                         // Checksum validation result
+    
+    // Statistics
+    nCommandsParsed     : UDINT;                        // Total commands parsed
+    nParseErrors        : UINT;                         // Parse error counter
+    nChecksumErrors     : UINT;                         // Checksum error counter
+    
+    // Internal state
+    bParsingEnabled     : BOOL := TRUE;                 // Parser enable flag
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//=============================================================================
+// Main execution of Command Parser (minimal - most work done in methods)
+//=============================================================================
+
+// Parser is typically called from main program when needed
+// Main processing happens in ParseCommand method]]></ST>
+    </Implementation>
+    
+    <Method Name="Init" Id="{5e6f7890-1234-5678-9012-3456789abcde}">
+      <Declaration><![CDATA[METHOD Init : BOOL
+//=============================================================================
+// Initialize Command Parser
+// Returns: TRUE if initialization successful
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Reset all counters and variables
+nCommandsParsed := 0;
+nParseErrors := 0;
+nChecksumErrors := 0;
+nLastError := GVL.ERR_NO_ERROR;
+
+// Clear working variables
+sWorkingString := '';
+sCalculatedChecksum := '';
+sReceivedChecksum := '';
+bChecksumValid := FALSE;
+nPartCount := 0;
+
+// Enable parsing
+bParsingEnabled := TRUE;
+
+// Mark as initialized
+bInitialized := TRUE;
+
+Init := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ParseCommand" Id="{6f789012-3456-7890-1234-56789abcdef0}">
+      <Declaration><![CDATA[METHOD ParseCommand : UINT
+//=============================================================================
+// Parse a command string and extract parameters
+// Input: Command string (e.g., "DO:0:1:A3")
+// Output: Parsed command structure
+// Returns: Error code (0 = success)
+//=============================================================================
+VAR_INPUT
+    sCommand : STRING(255);             // Input command string
+END_VAR
+VAR_IN_OUT
+    stResult : ST_ParsedCommand;        // Parsed command result
+END_VAR
+VAR
+    sCommandWithoutChecksum : STRING(200);
+    nChecksumPos : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Initialize result structure
+MEMSET(ADR(stResult), 0, SIZEOF(stResult));
+stResult.eCommandType := E_CommandType.CMD_UNKNOWN;
+stResult.nErrorCode := GVL.ERR_NO_ERROR;
+
+// Check if parser is enabled and initialized
+IF NOT bParsingEnabled OR NOT bInitialized THEN
+    stResult.nErrorCode := GVL.ERR_INITIALIZATION;
+    nLastError := GVL.ERR_INITIALIZATION;
+    ParseCommand := GVL.ERR_INITIALIZATION;
+    RETURN;
+END_IF
+
+// Validate input command length
+IF LEN(sCommand) = 0 OR LEN(sCommand) > GVL.MAX_COMMAND_LENGTH THEN
+    stResult.nErrorCode := GVL.ERR_INVALID_COMMAND;
+    nLastError := GVL.ERR_INVALID_COMMAND;
+    nParseErrors := nParseErrors + 1;
+    ParseCommand := GVL.ERR_INVALID_COMMAND;
+    RETURN;
+END_IF
+
+// Copy command to working string
+sWorkingString := sCommand;
+
+// Split command into parts
+nPartCount := SplitString(sWorkingString, GVL.CMD_SEPARATOR, arrParts);
+
+// Validate minimum number of parts (CMD:PARAM1:PARAM2:CHECKSUM = 4 parts)
+IF nPartCount < 4 THEN
+    stResult.nErrorCode := GVL.ERR_INVALID_COMMAND;
+    nLastError := GVL.ERR_INVALID_COMMAND;
+    nParseErrors := nParseErrors + 1;
+    ParseCommand := GVL.ERR_INVALID_COMMAND;
+    RETURN;
+END_IF
+
+// Extract command parts
+stResult.sCommandType := arrParts[0];
+stResult.sChecksum := arrParts[nPartCount - 1];  // Last part is checksum
+
+// Parse parameters based on command type
+IF NOT ParseParameters(stResult) THEN
+    stResult.nErrorCode := GVL.ERR_INVALID_COMMAND;
+    nLastError := GVL.ERR_INVALID_COMMAND;
+    nParseErrors := nParseErrors + 1;
+    ParseCommand := GVL.ERR_INVALID_COMMAND;
+    RETURN;
+END_IF
+
+// Validate checksum
+nChecksumPos := FIND_STRING_LAST(sCommand, GVL.CMD_SEPARATOR);
+IF nChecksumPos > 0 THEN
+    sCommandWithoutChecksum := LEFT(sCommand, nChecksumPos - 1);
+    sCalculatedChecksum := CalculateChecksum(sCommandWithoutChecksum);
+    
+    stResult.bChecksumValid := (sCalculatedChecksum = stResult.sChecksum);
+    
+    IF NOT stResult.bChecksumValid THEN
+        stResult.nErrorCode := GVL.ERR_CHECKSUM_ERROR;
+        nLastError := GVL.ERR_CHECKSUM_ERROR;
+        nChecksumErrors := nChecksumErrors + 1;
+        ParseCommand := GVL.ERR_CHECKSUM_ERROR;
+        RETURN;
+    END_IF
+ELSE
+    stResult.nErrorCode := GVL.ERR_INVALID_COMMAND;
+    nLastError := GVL.ERR_INVALID_COMMAND;
+    nParseErrors := nParseErrors + 1;
+    ParseCommand := GVL.ERR_INVALID_COMMAND;
+    RETURN;
+END_IF
+
+// Success
+nCommandsParsed := nCommandsParsed + 1;
+nLastError := GVL.ERR_NO_ERROR;
+ParseCommand := GVL.ERR_NO_ERROR;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="SplitString" Id="{789012345-6789-0123-4567-890123456789}">
+      <Declaration><![CDATA[METHOD SplitString : INT
+//=============================================================================
+// Split a string by separator into array of substrings
+// Input: String to split, separator character
+// Output: Array of resulting parts
+// Returns: Number of parts found
+//=============================================================================
+VAR_INPUT
+    sInput : STRING(255);               // String to split
+    sSeparator : STRING(1);             // Separator character
+END_VAR
+VAR_IN_OUT
+    arrResult : ARRAY[0..9] OF STRING(50);  // Result array
+END_VAR
+VAR
+    nPos : INT;
+    nStartPos : INT;
+    nPartIndex : INT;
+    sTemp : STRING(255);
+    bContinue : BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Clear result array
+FOR nPartIndex := 0 TO 9 DO
+    arrResult[nPartIndex] := '';
+END_FOR
+
+sTemp := sInput;
+nPartIndex := 0;
+bContinue := TRUE;
+
+WHILE LEN(sTemp) > 0 AND nPartIndex < 10 AND bContinue DO
+    nPos := FIND(sTemp, sSeparator);
+    
+    IF nPos > 0 THEN
+        // Found separator - extract part
+        arrResult[nPartIndex] := LEFT(sTemp, nPos - 1);
+        sTemp := RIGHT(sTemp, LEN(sTemp) - nPos);
+        nPartIndex := nPartIndex + 1;
+    ELSE
+        // No more separators - take remaining string
+        arrResult[nPartIndex] := sTemp;
+        nPartIndex := nPartIndex + 1;
+        bContinue := FALSE;
+    END_IF
+END_WHILE
+
+SplitString := nPartIndex;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ParseParameters" Id="{890123456-7890-1234-5678-901234567890}">
+      <Declaration><![CDATA[METHOD ParseParameters : BOOL
+//=============================================================================
+// Parse command parameters based on command type
+// Input/Output: Command structure to populate
+// Returns: TRUE if parsing successful
+//=============================================================================
+VAR_IN_OUT
+    stCommand : ST_ParsedCommand;
+END_VAR
+VAR
+    nTempValue : UINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Determine command type from string
+CASE stCommand.sCommandType OF
+    GVL.CMD_DIGITAL_OUTPUT:
+        stCommand.eCommandType := E_CommandType.CMD_DO;
+        
+        // Parse channel number (parameter 1)
+        IF STRING_TO_UINT_SAFE(arrParts[1], nTempValue) THEN
+            stCommand.nParameter1 := nTempValue;
+        ELSE
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+        // Parse value (parameter 2)
+        IF STRING_TO_UINT_SAFE(arrParts[2], nTempValue) THEN
+            stCommand.nParameter2 := nTempValue;
+        ELSE
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+        // Validate digital output parameters
+        IF stCommand.nParameter1 > GVL.DO_MAX_CHANNEL OR 
+           stCommand.nParameter2 > GVL.DO_MAX_VALUE THEN
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+    GVL.CMD_ANALOG_OUTPUT:
+        stCommand.eCommandType := E_CommandType.CMD_AO;
+        
+        // Parse channel number (parameter 1)
+        IF STRING_TO_UINT_SAFE(arrParts[1], nTempValue) THEN
+            stCommand.nParameter1 := nTempValue;
+        ELSE
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+        // Parse value (parameter 2)
+        IF STRING_TO_UINT_SAFE(arrParts[2], nTempValue) THEN
+            stCommand.nParameter2 := nTempValue;
+        ELSE
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+        // Validate analog output parameters
+        IF stCommand.nParameter1 > GVL.AO_MAX_CHANNEL OR 
+           stCommand.nParameter2 > GVL.AO_MAX_VALUE THEN
+            ParseParameters := FALSE;
+            RETURN;
+        END_IF
+        
+    GVL.CMD_DIGITAL_INPUT:
+        stCommand.eCommandType := E_CommandType.CMD_DI;
+        
+        // For DI commands, typically "ALL" for parameter 1
+        stCommand.nParameter1 := 0;  // Not used for DI requests
+        stCommand.nParameter2 := 0;  // Not used for DI requests
+        
+    GVL.CMD_SYSTEM_STATUS:
+        stCommand.eCommandType := E_CommandType.CMD_SYS;
+        
+        // For SYS commands, typically "STATUS" for parameter 1
+        stCommand.nParameter1 := 0;  // Not used for SYS requests
+        stCommand.nParameter2 := 0;  // Not used for SYS requests
+        
+    ELSE:
+        stCommand.eCommandType := E_CommandType.CMD_UNKNOWN;
+        ParseParameters := FALSE;
+        RETURN;
+END_CASE
+
+ParseParameters := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="CalculateChecksum" Id="{901234567-8901-2345-6789-012345678901}">
+      <Declaration><![CDATA[METHOD CalculateChecksum : STRING(2)
+//=============================================================================
+// Calculate XOR checksum of string
+// Input: String to calculate checksum for
+// Returns: 2-character hex checksum string
+//=============================================================================
+VAR_INPUT
+    sData : STRING(255);
+END_VAR
+VAR
+    nChecksum : BYTE := 0;
+    i : INT;
+    nChar : BYTE;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Calculate XOR checksum of all characters
+FOR i := 1 TO LEN(sData) DO
+    nChar := STRING_TO_BYTE(MID(sData, 1, i));
+    nChecksum := nChecksum XOR nChar;
+END_FOR
+
+// Convert to 2-character hex string
+CalculateChecksum := BYTE_TO_HEX(nChecksum, 2);]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ValidateCommand" Id="{012345678-9012-3456-7890-123456789012}">
+      <Declaration><![CDATA[METHOD ValidateCommand : BOOL
+//=============================================================================
+// Validate a parsed command for correctness
+// Input: Parsed command structure
+// Returns: TRUE if command is valid
+//=============================================================================
+VAR_INPUT
+    stCommand : ST_ParsedCommand;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Check if command type is known
+IF stCommand.eCommandType = E_CommandType.CMD_UNKNOWN THEN
+    ValidateCommand := FALSE;
+    RETURN;
+END_IF
+
+// Check if checksum was validated
+IF NOT stCommand.bChecksumValid THEN
+    ValidateCommand := FALSE;
+    RETURN;
+END_IF
+
+// Validate parameters based on command type
+CASE stCommand.eCommandType OF
+    E_CommandType.CMD_DO:
+        // Digital output validation
+        ValidateCommand := (stCommand.nParameter1 <= GVL.DO_MAX_CHANNEL) AND
+                          (stCommand.nParameter2 <= GVL.DO_MAX_VALUE);
+                          
+    E_CommandType.CMD_AO:
+        // Analog output validation
+        ValidateCommand := (stCommand.nParameter1 <= GVL.AO_MAX_CHANNEL) AND
+                          (stCommand.nParameter2 <= GVL.AO_MAX_VALUE);
+                          
+    E_CommandType.CMD_DI:
+        // Digital input request - always valid if parsed correctly
+        ValidateCommand := TRUE;
+        
+    E_CommandType.CMD_SYS:
+        // System status request - always valid if parsed correctly
+        ValidateCommand := TRUE;
+        
+    ELSE:
+        ValidateCommand := FALSE;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="GetStatistics" Id="{123456789-0123-4567-8901-234567890123}">
+      <Declaration><![CDATA[METHOD GetStatistics : ST_ParserStatistics
+//=============================================================================
+// Get parser statistics
+// Returns: Structure with parsing statistics
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[GetStatistics.nCommandsParsed := nCommandsParsed;
+GetStatistics.nParseErrors := nParseErrors;
+GetStatistics.nChecksumErrors := nChecksumErrors;
+GetStatistics.nLastError := nLastError;
+GetStatistics.bInitialized := bInitialized;
+GetStatistics.bParsingEnabled := bParsingEnabled;]]></ST>
+      </Implementation>
+    </Method>
+    
+    <Method Name="ResetStatistics" Id="{234567890-1234-5678-9012-345678901234}">
+      <Declaration><![CDATA[METHOD ResetStatistics : BOOL
+//=============================================================================
+// Reset parser statistics
+// Returns: TRUE if reset successful
+//=============================================================================
+VAR_INPUT
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[nCommandsParsed := 0;
+nParseErrors := 0;
+nChecksumErrors := 0;
+nLastError := GVL.ERR_NO_ERROR;
+
+ResetStatistics := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>
+
+//=============================================================================
+// Additional Type Definitions for Command Parser
+//=============================================================================
+
+TYPE ST_ParserStatistics :
+STRUCT
+    nCommandsParsed     : UDINT;        // Total commands parsed
+    nParseErrors        : UINT;         // Parse error count
+    nChecksumErrors     : UINT;         // Checksum error count
+    nLastError          : UINT;         // Last error code
+    bInitialized        : BOOL;         // Initialization status
+    bParsingEnabled     : BOOL;         // Parser enable status
+END_STRUCT
+END_TYPE
+
+//=============================================================================
+// Helper Functions
+//=============================================================================
+
+FUNCTION STRING_TO_UINT_SAFE : BOOL
+//=============================================================================
+// Safely convert string to UINT with error checking
+//=============================================================================
+VAR_INPUT
+    sInput : STRING(50);
+END_VAR
+VAR_OUTPUT
+    nResult : UINT;
+END_VAR
+VAR
+    nTemp : UINT;
+END_VAR
+
+// Try to convert string to number
+// In real TwinCAT implementation, use proper error handling
+nTemp := STRING_TO_UINT(sInput);
+
+// Basic validation - in real implementation, add more robust checking
+IF sInput = '0' OR nTemp > 0 THEN
+    nResult := nTemp;
+    STRING_TO_UINT_SAFE := TRUE;
+ELSE
+    nResult := 0;
+    STRING_TO_UINT_SAFE := FALSE;
+END_IF
+
+END_FUNCTION
+
+FUNCTION BYTE_TO_HEX : STRING(2)
+//=============================================================================
+// Convert byte to 2-character hex string
+//=============================================================================
+VAR_INPUT
+    nByte : BYTE;
+    nWidth : INT;
+END_VAR
+VAR
+    sResult : STRING(2);
+END_VAR
+
+// Convert byte to hex string
+// In real TwinCAT implementation, use proper conversion functions
+sResult := TO_STRING(nByte, '%02X');
+BYTE_TO_HEX := sResult;
+
+END_FUNCTION
+
+FUNCTION FIND_STRING_LAST : INT
+//=============================================================================
+// Find last occurrence of substring in string
+//=============================================================================
+VAR_INPUT
+    sSource : STRING(255);
+    sFind : STRING(50);
+END_VAR
+VAR
+    nPos : INT;
+    nLastPos : INT;
+    sTemp : STRING(255);
+END_VAR
+
+sTemp := sSource;
+nLastPos := 0;
+
+REPEAT
+    nPos := FIND(sTemp, sFind);
+    IF nPos > 0 THEN
+        nLastPos := nLastPos + nPos;
+        sTemp := RIGHT(sTemp, LEN(sTemp) - nPos);
+    END_IF
+UNTIL nPos = 0
+
+FIND_STRING_LAST := nLastPos;
+
+END_FUNCTION

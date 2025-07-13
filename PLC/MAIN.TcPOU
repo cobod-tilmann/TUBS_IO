@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <POU Name="MAIN" Id="{1a2b3c4d-5e6f-7890-1234-567890abcdef}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+    // Function blocks for system components
+    fbSerialHandler     : FB_SerialHandler;
+    fbCommandParser     : FB_CommandParser;
+    
+    // System state variables
+    bSystemInitialized  : BOOL := FALSE;
+    bSerialConnected    : BOOL := FALSE;
+    bNewCommandReceived : BOOL := FALSE;
+    
+    // Communication buffers
+    sReceivedCommand    : STRING(255);
+    sResponseMessage    : STRING(255);
+    
+    // Command processing variables
+    stParsedCommand     : ST_ParsedCommand;
+    nCommandResult      : UINT;
+    
+    // System diagnostics
+    nSystemErrors       : UINT := 0;
+    sLastError          : STRING(100);
+    
+    // Initialization state machine
+    eInitState          : E_InitState := E_InitState.INIT_START;
+    
+    // Timers
+    tonInitTimeout      : TON;
+    tonHeartbeat        : TON;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//=============================================================================
+// MAIN Program - Serial Interpreter for DUET3D 6HC Controller
+// Purpose: Coordinates serial communication and command processing
+// Target: Beckhoff CX7080 Controller
+//=============================================================================
+
+// System Initialization State Machine
+CASE eInitState OF
+    E_InitState.INIT_START:
+        // Start initialization sequence
+        tonInitTimeout(IN := TRUE, PT := T#10S);
+        eInitState := E_InitState.INIT_SERIAL;
+        
+    E_InitState.INIT_SERIAL:
+        // Initialize serial communication
+        IF fbSerialHandler.Init() THEN
+            eInitState := E_InitState.INIT_PARSER;
+        ELSIF tonInitTimeout.Q THEN
+            // Initialization timeout
+            nSystemErrors := nSystemErrors + 1;
+            sLastError := 'Serial initialization timeout';
+            eInitState := E_InitState.INIT_ERROR;
+        END_IF
+        
+    E_InitState.INIT_PARSER:
+        // Initialize command parser
+        IF fbCommandParser.Init() THEN
+            eInitState := E_InitState.INIT_COMPLETE;
+        END_IF
+        
+    E_InitState.INIT_COMPLETE:
+        // System initialization completed
+        bSystemInitialized := TRUE;
+        tonInitTimeout(IN := FALSE);
+        eInitState := E_InitState.RUNNING;
+        
+    E_InitState.INIT_ERROR:
+        // Handle initialization errors
+        // Could implement retry logic here
+        tonInitTimeout(IN := FALSE);
+        
+    E_InitState.RUNNING:
+        // Normal operation mode
+        bSystemInitialized := TRUE;
+END_CASE
+
+// Main execution only runs after successful initialization
+IF bSystemInitialized AND eInitState = E_InitState.RUNNING THEN
+    
+    //-------------------------------------------------------------------------
+    // Serial Communication Handling
+    //-------------------------------------------------------------------------
+    
+    // Update serial handler
+    fbSerialHandler();
+    bSerialConnected := fbSerialHandler.bConnected;
+    
+    // Check for new commands
+    IF fbSerialHandler.bNewCommandReceived THEN
+        sReceivedCommand := fbSerialHandler.sReceivedCommand;
+        bNewCommandReceived := TRUE;
+        
+        // Clear the command received flag
+        fbSerialHandler.bNewCommandReceived := FALSE;
+    END_IF
+    
+    //-------------------------------------------------------------------------
+    // Command Processing
+    //-------------------------------------------------------------------------
+    
+    IF bNewCommandReceived THEN
+        // Parse the received command
+        nCommandResult := fbCommandParser.ParseCommand(
+            sCommand := sReceivedCommand,
+            stResult := stParsedCommand
+        );
+        
+        IF nCommandResult = GVL.ERR_NO_ERROR THEN
+            // Process valid command
+            ProcessValidCommand();
+        ELSE
+            // Handle parsing errors
+            ProcessCommandError(nCommandResult);
+        END_IF
+        
+        // Reset command received flag
+        bNewCommandReceived := FALSE;
+        sReceivedCommand := '';
+    END_IF
+    
+    //-------------------------------------------------------------------------
+    // Response Transmission
+    //-------------------------------------------------------------------------
+    
+    // Send response if one is prepared
+    IF LEN(sResponseMessage) > 0 THEN
+        IF fbSerialHandler.SendResponse(sResponseMessage) THEN
+            // Response sent successfully, clear buffer
+            sResponseMessage := '';
+        END_IF
+    END_IF
+    
+    //-------------------------------------------------------------------------
+    // System Diagnostics
+    //-------------------------------------------------------------------------
+    
+    // Heartbeat timer for system monitoring
+    tonHeartbeat(IN := TRUE, PT := T#1S);
+    IF tonHeartbeat.Q THEN
+        tonHeartbeat(IN := FALSE);
+        // Could add periodic diagnostic tasks here
+    END_IF
+    
+    // Monitor for system errors
+    IF fbSerialHandler.nLastError <> GVL.ERR_NO_ERROR THEN
+        nSystemErrors := nSystemErrors + 1;
+        sLastError := 'Serial communication error';
+    END_IF
+    
+END_IF
+
+// Update timers
+tonInitTimeout();
+tonHeartbeat();]]></ST>
+    </Implementation>
+    <Method Name="ProcessValidCommand" Id="{2b3c4d5e-6f78-9012-3456-789012345678}">
+      <Declaration><![CDATA[METHOD ProcessValidCommand : BOOL
+VAR_INPUT
+END_VAR
+VAR
+    sCommand : STRING(10);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Process a successfully parsed command
+sCommand := stParsedCommand.sCommandType;
+
+CASE sCommand OF
+    'DO':
+        // Digital Output Command
+        ProcessDigitalOutputCommand();
+        
+    'AO':
+        // Analog Output Command  
+        ProcessAnalogOutputCommand();
+        
+    'DI':
+        // Digital Input Status Request
+        ProcessDigitalInputRequest();
+        
+    'SYS':
+        // System Status Request
+        ProcessSystemStatusRequest();
+        
+    ELSE
+        // Unknown command type
+        sResponseMessage := 'ERR:UNKNOWN_COMMAND:' + 
+                           fbCommandParser.CalculateChecksum('ERR:UNKNOWN_COMMAND');
+END_CASE
+
+ProcessValidCommand := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessCommandError" Id="{3c4d5e6f-7890-1234-5678-90123456789a}">
+      <Declaration><![CDATA[METHOD ProcessCommandError : BOOL
+VAR_INPUT
+    nErrorCode : UINT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Handle command parsing errors and generate appropriate responses
+CASE nErrorCode OF
+    GVL.ERR_INVALID_COMMAND:
+        sResponseMessage := 'ERR:INVALID_COMMAND:' + 
+                           fbCommandParser.CalculateChecksum('ERR:INVALID_COMMAND');
+                           
+    GVL.ERR_CHECKSUM_ERROR:
+        sResponseMessage := 'ERR:CHECKSUM_ERROR:' + 
+                           fbCommandParser.CalculateChecksum('ERR:CHECKSUM_ERROR');
+                           
+    ELSE
+        sResponseMessage := 'ERR:PARSE_ERROR:' + 
+                           fbCommandParser.CalculateChecksum('ERR:PARSE_ERROR');
+END_CASE
+
+// Log the error
+nSystemErrors := nSystemErrors + 1;
+sLastError := 'Command error: ' + UINT_TO_STRING(nErrorCode);
+
+ProcessCommandError := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessDigitalOutputCommand" Id="{4d5e6f78-9012-3456-7890-123456789abc}">
+      <Declaration><![CDATA[METHOD ProcessDigitalOutputCommand : BOOL
+VAR_INPUT
+END_VAR
+VAR
+    nChannel : UINT;
+    bValue   : BOOL;
+    sResponse : STRING(50);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Process digital output command: DO:CH:VAL:CHECKSUM
+nChannel := stParsedCommand.nParameter1;
+bValue := (stParsedCommand.nParameter2 > 0);
+
+// Validate channel number
+IF nChannel <= 7 THEN
+    // Set digital output (placeholder for actual I/O control)
+    // In full implementation, this would control EPP2008-0002 module
+    
+    // Generate success response
+    sResponse := 'OK:DO:' + UINT_TO_STRING(nChannel);
+    sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+    
+ELSE
+    // Invalid channel number
+    sResponse := 'ERR:INVALID_CHANNEL';
+    sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+END_IF
+
+ProcessDigitalOutputCommand := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessAnalogOutputCommand" Id="{5e6f7890-1234-5678-9012-3456789abcde}">
+      <Declaration><![CDATA[METHOD ProcessAnalogOutputCommand : BOOL
+VAR_INPUT
+END_VAR
+VAR
+    nChannel : UINT;
+    nValue   : UINT;
+    sResponse : STRING(50);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Process analog output command: AO:CH:VAL:CHECKSUM
+nChannel := stParsedCommand.nParameter1;
+nValue := stParsedCommand.nParameter2;
+
+// Validate channel number and value range
+IF nChannel <= 3 AND nValue <= 65535 THEN
+    // Set analog output (placeholder for actual I/O control)
+    // In full implementation, this would control EPP4174-0002 module
+    
+    // Generate success response
+    sResponse := 'OK:AO:' + UINT_TO_STRING(nChannel);
+    sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+    
+ELSE
+    // Invalid channel or value
+    IF nChannel > 3 THEN
+        sResponse := 'ERR:INVALID_CHANNEL';
+    ELSE
+        sResponse := 'ERR:INVALID_VALUE';
+    END_IF
+    sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+END_IF
+
+ProcessAnalogOutputCommand := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessDigitalInputRequest" Id="{6f789012-3456-7890-1234-56789abcdef0}">
+      <Declaration><![CDATA[METHOD ProcessDigitalInputRequest : BOOL
+VAR_INPUT
+END_VAR
+VAR
+    nInputStatus : UINT := 16#A5F0; // Placeholder input status
+    sResponse : STRING(50);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Process digital input status request: DI:ALL:0:CHECKSUM
+// In full implementation, this would read actual input module status
+
+// Format response with hex-encoded input status
+sResponse := 'DI:' + UINT_TO_HEX(nInputStatus, 4);
+sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+
+ProcessDigitalInputRequest := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ProcessSystemStatusRequest" Id="{789012345-6789-0123-4567-890123456789}">
+      <Declaration><![CDATA[METHOD ProcessSystemStatusRequest : BOOL
+VAR_INPUT
+END_VAR
+VAR
+    sResponse : STRING(100);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// Process system status request: SYS:STATUS:0:CHECKSUM
+sResponse := 'OK:' + GVL.CONTROLLER_TYPE + ':' + GVL.SYSTEM_VERSION;
+sResponseMessage := sResponse + ':' + fbCommandParser.CalculateChecksum(sResponse);
+
+ProcessSystemStatusRequest := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>
