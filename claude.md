@@ -73,6 +73,20 @@ INIT_ERROR ←──────────────────────
 - **Serial Timeout**: 1000ms for communication operations
 - All operations must be non-blocking
 
+### Development Workflow Requirements
+- **ALWAYS UPDATE README.md**: When making any changes to files, update the main README.md file to reflect:
+  - New features or functionality added
+  - Modified behavior or interfaces
+  - Updated usage instructions
+  - Changed dependencies or requirements
+  - New files or directories created
+- **ALWAYS CREATE COMMITS**: After completing any task or making changes:
+  - Stage all relevant files with `git add`
+  - Create descriptive commit messages following project conventions
+  - Include technical details and rationale for changes
+  - Use the standard commit footer with Claude Code attribution
+  - Commit immediately after completing logical units of work
+
 ## Testing and Validation
 
 ### Test Environment
