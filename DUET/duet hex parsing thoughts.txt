@@ -1,0 +1,45 @@
+Simple Hex Response Protocol
+From Beckhoff to DUET:
+Button 1 pressed:    "BP1\r\n"  → hex: "42 50 31 0d 0a"
+Button 1 released:   "BR1\r\n"  → hex: "42 52 31 0d 0a"
+Button 2 pressed:    "BP2\r\n"  → hex: "42 50 32 0d 0a"
+Safety OK:           "SOK\r\n"  → hex: "53 4f 4b 0d 0a"
+Safety FAULT:        "SER\r\n"  → hex: "53 45 52 0d 0a"
+System READY:        "RDY\r\n"  → hex: "52 44 59 0d 0a"
+G-code Pattern Matching
+gcode// Wait for button 1 press
+M118 P1 S"REQ_BTN1"              ; Request button 1 status
+G4 P500
+M261.2 P1 R10 V"response"
+
+// Simple pattern check
+if {regex.test(global.response, "42 50 31")}  // "BP1" in hex
+    echo "Button 1 pressed!"
+    M118 P1 S"LED1_ON"           ; Confirm to Beckhoff
+elif {regex.test(global.response, "42 52 31")} // "BR1" in hex  
+    echo "Button 1 released"
+Beckhoff Implementation
+In your Beckhoff parser, modify the response generation:
+pascal// In your TwinCAT response generation
+CASE ParsedCommand.CommandType OF
+    CMD_DO_GET:
+        IF DigitalOutputs[ParsedCommand.Channel] THEN
+            sResponse := 'BP' + TO_STRING(ParsedCommand.Channel);  // Button Pressed
+        ELSE
+            sResponse := 'BR' + TO_STRING(ParsedCommand.Channel);  // Button Released
+        END_IF
+        
+    CMD_SYSTEM:
+        IF FIND(ParsedCommand.RawCommand, 'STATUS') > 0 THEN
+            sResponse := 'RDY';  // System Ready
+        END_IF
+END_CASE
+This gives you:
+
+✅ Simple patterns to match in G-code
+✅ Fast parsing with regex
+✅ Reliable communication
+✅ Easy to extend with new response codes
+✅ Compact messages for faster transmission
+
+Much cleaner than trying to parse complex comma-separated responses in G-code!

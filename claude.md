@@ -28,7 +28,7 @@ TUBS_IO is a TwinCAT3-based serial interpreter that enables communication betwee
 ### Key Directories
 - `PLC/` - Core TwinCAT3 structured text code
 - `DOCS/` - Comprehensive project documentation and integration guides
-- `DUET/` - DUET3D controller integration files (future use)
+- `DUET/` - DUET3D controller integration files with custom M-codes
 
 ## Architecture Overview
 
@@ -39,9 +39,9 @@ TUBS_IO is a TwinCAT3-based serial interpreter that enables communication betwee
 4. **GVL.TcGVL** - Global definitions including constants, error codes, and type definitions
 
 ### Communication Protocol
-- **Format**: `CMD:PARAM1:PARAM2:CHECKSUM\r\n`
+- **Format**: `COMMANDPARAMETERS\r\n` (simplified)
 - **Supported Commands**: DO (digital output), AO (analog output), DI (digital input), SYS (system status)
-- **Validation**: XOR checksum for message integrity
+- **Responses**: Simple 3-character ASCII codes (RDY, OK, BP1, BR1, etc.)
 - **Error Handling**: Comprehensive error codes and response system
 
 ### System States
@@ -115,6 +115,22 @@ AO:0:32768:XX      # Analog output test (calculate checksum)
 - `DOCS/ProtocolDescription.md` - Complete communication protocol specification
 - `DOCS/DuetIntegration.md` - DUET3D controller integration guide with macros
 - `DOCS/PLCCodeOverview.md` - Detailed architecture and design documentation
+
+### DUET3D Integration
+- `DUET/M5100.g` - Serial interface initialization M-code
+  - Uses M260.2/M261.2 for UART communication
+  - Sends "SYS" command, expects "RDY" response
+  - Aborts on initialization failure
+- `DUET/M5110.g` - Digital/analog output control M-code
+  - Usage: M5110 T0 C3 V1 (digital) or M5110 T1 C0 V32768 (analog)
+  - Sends simplified commands like "DO31" or "AO0500"
+  - Expects "OK" response from controller
+- `DUET/M5120.g` - Digital input reading M-code with hex response
+  - Usage: M5120 A5 (read input 5)
+  - Expects "BP5" (pressed) or "BR5" (released) responses
+  - Returns hex codes: 0001 (ON), 0000 (OFF), FF00 (error)
+- `DUET/README.md` - Complete M-code documentation
+- `DUET/QUICK_REFERENCE.md` - Quick reference for operators
 
 ## Working with the Codebase
 
